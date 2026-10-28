@@ -34,6 +34,9 @@ $ npm install
 ## Compile and run the project
 
 ```bash
+# Generate Prisma Client before the first start
+$ npm run prisma:generate
+
 # development
 $ npm run start
 
@@ -77,16 +80,52 @@ OpenAPI JSON: `http://localhost:3000/docs-json` and generated `openapi.json`.
 
 The API uses a bearer authorization scheme named `bearer`. Project requests and responses include examples in the OpenAPI document. Source repository: [GitHub](https://github.com/NadiaSuganiaka/Frameworks-pr1).
 
-The `ProjectsModule` contains the HTTP controller, application service, repository port, and in-memory repository adapter. The controller only translates HTTP input into service calls.
+The `ProjectsModule` contains the HTTP controller, application service, repository port, and PostgreSQL adapter. The controller only translates HTTP input into service calls. The in-memory adapter remains available for isolated unit tests.
 
 ```text
 ProjectsController -> ProjectsService -> ProjectsRepositoryPort
                                               ^
                                               |
-                                  InMemoryProjectsRepository
+                                  PrismaProjectRepository -> PostgreSQL
 ```
 
 The repository port exposes `create`, `findAll`, `findOne`, `update`, and `remove`.
+
+## PostgreSQL and Prisma 7
+
+Copy `.env.example` to `.env` on first setup (keep existing environment values if already configured), then run:
+
+```bash
+docker compose up -d --wait
+npm install
+npm run db:deploy
+npm run prisma:generate
+npm run db:seed
+npm run start:dev
+```
+
+The local database uses port `5433`, database/user/password `nest_test`/`nest`/`nest`. These are development credentials. Configure `DATABASE_URL` for other environments. PostgreSQL data is stored in the named `postgres_data` volume and survives server/container restarts. `docker compose down` preserves it; `docker compose down -v` deletes it.
+
+The initial SQL migration is committed in `prisma/migrations`. For subsequent schema changes, run `npm run db:migrate -- --name <change>`, then regenerate the client. Deployment uses `npm run db:deploy`; it does not reset existing data. Prisma 7 configures the datasource and seed command in `prisma.config.ts`; seed runs explicitly with `npm run db:seed` ([Prisma seeding documentation](https://www.prisma.io/docs/orm/v7/prisma-migrate/workflows/seeding)). The transactional seed creates two users, StudyFlow, two memberships and one task; running it again preserves existing records.
+
+| Model | Keys and constraints | Additional indexes |
+| --- | --- | --- |
+| Project | Integer primary key; unique name; enum status | `(status, createdAt)` |
+| User | Integer primary key; unique email | Unique email index |
+| Task | Integer primary key; project and optional assignee foreign keys; enum status | `(projectId, status)`, `assigneeId` |
+| Membership | Composite primary key `(projectId, userId)`; both foreign keys; enum role | `userId` |
+
+Project deletion cascades to tasks and memberships. User deletion removes memberships and sets task assignees to null. The membership primary key prevents duplicate membership in the same project. Foreign keys are covered by indexes, including the leading columns of composite indexes. Task assignees reference users; membership in the task's project is not enforced by this schema.
+
+The HTTP routes, numeric IDs, status values, ISO timestamps and error envelope remain unchanged. An absent description is omitted from JSON. Database uniqueness conflicts become HTTP 409, including concurrent writes; missing update/delete targets retain HTTP 404. Prisma connects at module initialization and disconnects on application shutdown.
+
+```bash
+npm test
+npm run test:e2e
+npm run test:persistence
+```
+
+Database tests require the configured PostgreSQL instance and applied migrations. The persistence test builds the application, starts a separate server on port `3101`, checks create/read/update/delete across three process restarts, verifies concurrent name conflicts and removes its test projects. Unit tests use the in-memory adapter and do not require PostgreSQL.
 
 ## Legacy Nest documentation
 

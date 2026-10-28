@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ProjectsController } from './projects.controller.js';
-import { InMemoryProjectsRepository } from './in-memory-projects.repository.js';
+import { PrismaProjectRepository } from './prisma-project.repository.js';
+import { PrismaService } from '../prisma/prisma.service.js';
 import { ProjectsService } from './projects.service.js';
 import { PROJECTS_REPOSITORY } from './projects.repository.js';
 
@@ -8,8 +9,9 @@ import { PROJECTS_REPOSITORY } from './projects.repository.js';
   controllers: [ProjectsController],
   providers: [
     ProjectsService,
-    InMemoryProjectsRepository,
-    { provide: PROJECTS_REPOSITORY, useExisting: InMemoryProjectsRepository },
+    PrismaService,
+    PrismaProjectRepository,
+    { provide: PROJECTS_REPOSITORY, useExisting: PrismaProjectRepository },
   ],
 })
 export class ProjectsModule {}
