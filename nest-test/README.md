@@ -47,19 +47,6 @@ $ npm run start:dev
 $ npm run start:prod
 ```
 
-## Run tests
-
-```bash
-# unit tests
-$ npm run test
-
-# e2e tests
-$ npm run test:e2e
-
-# test coverage
-$ npm run test:cov
-```
-
 ## Deployment
 
 When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
@@ -80,16 +67,13 @@ OpenAPI JSON: `http://localhost:3000/docs-json` and generated `openapi.json`.
 
 The API uses a bearer authorization scheme named `bearer`. Project requests and responses include examples in the OpenAPI document. Source repository: [GitHub](https://github.com/NadiaSuganiaka/Frameworks-pr1).
 
-The `ProjectsModule` contains the HTTP controller, application service, repository port, and PostgreSQL adapter. The controller only translates HTTP input into service calls. The in-memory adapter remains available for isolated unit tests.
+The `ProjectsModule` contains the HTTP controller, application service, and Prisma repository. The controller translates HTTP input into service calls. The service receives `PrismaProjectRepository` directly through Nest dependency injection.
 
 ```text
-ProjectsController -> ProjectsService -> ProjectsRepositoryPort
-                                              ^
-                                              |
-                                  PrismaProjectRepository -> PostgreSQL
+ProjectsController -> ProjectsService -> PrismaProjectRepository -> PostgreSQL
 ```
 
-The repository port exposes `create`, `findAll`, `findOne`, `update`, and `remove`.
+The repository provides project queries, CRUD operations, and membership creation.
 
 ## PostgreSQL and Prisma 7
 
@@ -117,15 +101,52 @@ The initial SQL migration is committed in `prisma/migrations`. For subsequent sc
 
 Project deletion cascades to tasks and memberships. User deletion removes memberships and sets task assignees to null. The membership primary key prevents duplicate membership in the same project. Foreign keys are covered by indexes, including the leading columns of composite indexes. Task assignees reference users; membership in the task's project is not enforced by this schema.
 
-The HTTP routes, numeric IDs, status values, ISO timestamps and error envelope remain unchanged. An absent description is omitted from JSON. Database uniqueness conflicts become HTTP 409, including concurrent writes; missing update/delete targets retain HTTP 404. Prisma connects at module initialization and disconnects on application shutdown.
+Project detail responses retain numeric IDs, status values and ISO timestamps. An absent description is omitted from JSON. Database uniqueness conflicts become HTTP 409, including concurrent writes; missing update/delete targets retain HTTP 404. Prisma connects at module initialization and disconnects on application shutdown. PR7 extends the list response and requires an owner on creation, as documented below.
 
-```bash
-npm test
-npm run test:e2e
-npm run test:persistence
+
+## Практична робота 7
+
+Маршрути доступні через `/api/projects` та `/projects`. Swagger: `/docs`. Список тепер повертає `{ data, meta }`. Під час створення потрібен `ownerId` наявного користувача. Авторизація поки не реалізована: bearer у Swagger лише описує схему, тому власник передається в DTO. Після додавання авторизації його потрібно брати з поточного користувача.
+
+```http
+GET /api/projects?page=1&size=5&status=active&sort=name&order=asc
+GET /api/projects?assigneeId=2&sort=createdAt&order=desc
+
+POST /api/projects
+Content-Type: application/json
+
+{"name":"PR7 Project","status":"active","ownerId":1}
+
+POST /api/projects/1/memberships
+Content-Type: application/json
+
+{"userId":2}
 ```
 
-Database tests require the configured PostgreSQL instance and applied migrations. The persistence test builds the application, starts a separate server on port `3101`, checks create/read/update/delete across three process restarts, verifies concurrent name conflicts and removes its test projects. Unit tests use the in-memory adapter and do not require PostgreSQL.
+ID у прикладах замініть на наявні ID зі своєї БД. Seed створює користувачів `alice@example.com` та `bob@example.com`.
+
+| Параметр | Правила |
+| --- | --- |
+| `page` | Ціле число від 1; стандартно 1; максимум 21474836 для безпечного PostgreSQL offset |
+| `size` | Ціле число 1–100; стандартно 10 |
+| `status` | `draft`, `active`, `completed`; відсутність означає без фільтра |
+| `assigneeId` | Додатний integer ID користувача до 2147483647; проєкт має хоча б одну задачу цього виконавця |
+| `sort` | `createdAt`, `updatedAt`, `name`; стандартно `createdAt` |
+| `order` | `asc`, `desc`; стандартно `desc` |
+
+У схемі попередньої практичної ID користувачів числові, тому UUID не використовується. Некоректний ID або невідомий статус повертає 400. Обидва фільтри поєднуються через AND; кілька задач одного виконавця не дублюють проєкт у результаті. Для будь-якого сортування другий ключ — `id` із тим самим напрямком. `updatedAt` зберігається в БД і автоматично оновлюється Prisma при зміні проєкту; поле доступне для сортування без зміни форми detail-відповіді.
+
+Пагінація виконується через `skip = (page - 1) * size` і `take = size`. `total` використовує ті самі фільтри. Список та count виконуються у транзакції `RepeatableRead`, щоб відображати один знімок даних. `meta` містить `page`, `size`, `total`, `totalPages = Math.ceil(total / size)`, `hasNextPage = page < totalPages`, `hasPreviousPage = page > 1`. За відсутності збігів `totalPages` дорівнює 0; сторінка за межами списку повертає 200 з `data: []`.
+
+Створення `Project` і `Membership` з роллю `owner` виконується через `tx` у спільній callback-транзакції. Помилка foreign key власника відкатує проєкт і повертає 400. Складений primary key `Membership(projectId, userId)` уже забезпечує вимогу унікальності пари, тому дублювати його додатковим unique-індексом не потрібно. Реальний Prisma P2002 під час додавання учасника повертає 409 з `errorCode: MEMBERSHIP_ALREADY_EXISTS`. Збережено попередній формат помилки: `statusCode`, `errorCode`, `message`, `path`, `timestamp`, `traceId`. Внутрішні деталі неочікуваних помилок БД клієнту не повертаються.
+
+### Контрольні запитання
+
+1. **Навіщо `id` як другий ключ?** Він задає однозначний порядок для записів з однаковою датою або назвою й робить повторні запити стабільними за незмінних даних.
+2. **Page та cursor:** сторінка використовує offset і дозволяє перехід за номером; cursor продовжує після конкретного запису, краще працює на великих зміщеннях і менше залежить від нових вставок перед поточною позицією. Offset-пагінація може зміщувати результати між запитами при зміні даних.
+3. **Чому однакові фільтри для `total`?** Інакше метадані рахуватимуть іншу множину, а кількість сторінок і навігація будуть неправильними.
+4. **Що буде без спільної транзакції?** Після успішного створення проєкту помилка membership може залишити проєкт без власника. Транзакція відкатує обидві операції.
+5. **Чому перевірки в сервісі недостатньо?** Два паралельні запити можуть одночасно не знайти дубля. Унікальний ключ БД атомарно дозволить лише один запис; помилка другого перетворюється на 409.
 
 ## Legacy Nest documentation
 

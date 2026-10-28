@@ -1,12 +1,15 @@
-import { Body, Controller, Delete, Get, Param, ParseIntPipe, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, ParseIntPipe, Patch, Post, Query } from '@nestjs/common';
 import { ProjectsService } from './projects.service.js';
 import { CreateProjectDto } from './dto/create-project.dto.js';
 import { UpdateProjectDto } from './dto/update-project.dto.js';
 import { ApiBearerAuth, ApiBody, ApiCreatedResponse, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { ProjectResponseDto } from './dto/project-response.dto.js';
 import { ApiErrorDto } from '../common/api-error.dto.js';
+import { ListProjectsDto } from './dto/list-projects.dto.js';
+import { ProjectPageDto } from './dto/project-page.dto.js';
+import { AddMembershipDto } from './dto/add-membership.dto.js';
 
-@Controller('projects')
+@Controller(['projects', 'api/projects'])
 @ApiTags('Projects')
 @ApiBearerAuth()
 export class ProjectsController {
@@ -14,7 +17,7 @@ export class ProjectsController {
 
   @Post()
   @ApiOperation({ summary: 'Create a project' })
-  @ApiBody({ type: CreateProjectDto, examples: { active: { value: { name: 'StudyFlow', description: 'Система керування навчальними проєктами', status: 'active' } } } })
+  @ApiBody({ type: CreateProjectDto, examples: { active: { value: { name: 'StudyFlow', description: 'Система керування навчальними проєктами', status: 'active', ownerId: 1 } } } })
   @ApiCreatedResponse({ type: ProjectResponseDto })
   @ApiResponse({ status: 400, type: ApiErrorDto })
   @ApiResponse({ status: 409, type: ApiErrorDto })
@@ -23,11 +26,21 @@ export class ProjectsController {
   }
 
   @Get()
-  @ApiOperation({ summary: 'List all projects' })
-  @ApiResponse({ status: 200, type: ProjectResponseDto, isArray: true })
+  @ApiOperation({ summary: 'List projects with pagination, filters and sorting' })
+  @ApiResponse({ status: 200, type: ProjectPageDto })
   @ApiResponse({ status: 400, type: ApiErrorDto })
-  findAll() {
-    return this.projectsService.findAll();
+  findAll(@Query() query: ListProjectsDto) {
+    return this.projectsService.findAll(query);
+  }
+
+  @Post(':id/memberships')
+  @ApiOperation({ summary: 'Add a project member' })
+  @ApiResponse({ status: 201, description: 'Membership created' })
+  @ApiResponse({ status: 400, type: ApiErrorDto })
+  @ApiResponse({ status: 404, type: ApiErrorDto })
+  @ApiResponse({ status: 409, type: ApiErrorDto })
+  addMember(@Param('id', ParseIntPipe) id: number, @Body() data: AddMembershipDto) {
+    return this.projectsService.addMember(id, data.userId);
   }
 
   @Get(':id')

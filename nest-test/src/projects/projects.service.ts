@@ -1,22 +1,34 @@
-import { ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { CreateProjectDto } from './dto/create-project.dto.js';
 import { UpdateProjectDto } from './dto/update-project.dto.js';
 import { ProjectResponseDto } from './dto/project-response.dto.js';
 import type { Project } from './entities/project.entity.js';
-import { PROJECTS_REPOSITORY } from './projects.repository.js';
-import type { ProjectsRepositoryPort } from './projects.repository.js';
+import { PrismaProjectRepository } from './prisma-project.repository.js';
+import { ListProjectsDto } from './dto/list-projects.dto.js';
+import type { ProjectPageDto } from './dto/project-page.dto.js';
 
 @Injectable()
 export class ProjectsService {
-  constructor(@Inject(PROJECTS_REPOSITORY) private readonly repository: ProjectsRepositoryPort) {}
+  constructor(private readonly repository: PrismaProjectRepository) {}
 
   async create(data: CreateProjectDto): Promise<ProjectResponseDto> {
     await this.ensureNameIsUnique(data.name);
     return this.toResponse(await this.repository.create(data));
   }
 
-  async findAll(): Promise<ProjectResponseDto[]> {
-    return (await this.repository.findAll()).map((project) => this.toResponse(project));
+  async findAll(query: ListProjectsDto = new ListProjectsDto()): Promise<ProjectPageDto> {
+    const { data, total } = await this.repository.findPage(query);
+    const totalPages = Math.ceil(total / query.size);
+    return {
+      data: data.map((project) => this.toResponse(project)),
+      meta: { page: query.page, size: query.size, total, totalPages,
+        hasNextPage: query.page < totalPages, hasPreviousPage: query.page > 1 },
+    };
+  }
+
+  async addMember(projectId: number, userId: number) {
+    await this.getOrThrow(projectId);
+    return this.repository.addMember(projectId, userId);
   }
 
   async findOne(id: number): Promise<ProjectResponseDto> {

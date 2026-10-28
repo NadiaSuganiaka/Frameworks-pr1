@@ -19,6 +19,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
     const exceptionResponse = exception instanceof HttpException ? exception.getResponse() : undefined;
     const message = typeof exceptionResponse === 'object' && exceptionResponse !== null && 'message' in exceptionResponse
       ? exceptionResponse.message
+      : status === HttpStatus.INTERNAL_SERVER_ERROR ? 'Internal server error'
       : exception instanceof Error ? exception.message : 'Internal server error';
 
     response.status(status).json({
@@ -32,6 +33,10 @@ export class HttpExceptionFilter implements ExceptionFilter {
   }
 
   private errorCode(status: number, exception: unknown): string {
+    if (exception instanceof HttpException) {
+      const body = exception.getResponse();
+      if (typeof body === 'object' && body !== null && 'errorCode' in body) return String(body.errorCode);
+    }
     if (status === HttpStatus.NOT_FOUND) return 'PROJECT_NOT_FOUND';
     if (exception instanceof ConflictException) return 'PROJECT_NAME_CONFLICT';
     if (status === HttpStatus.BAD_REQUEST) return 'VALIDATION_ERROR';

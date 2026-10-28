@@ -1,8 +1,14 @@
-import { IsEnum, IsOptional, IsString, Length } from 'class-validator';
+import { IsEnum, IsInt, IsOptional, IsString, Length, Min, Max } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { ProjectStatus } from '../entities/project.entity.js';
 
 export class CreateProjectDto {
+  @ApiProperty({ example: 1, minimum: 1, description: 'Existing owner user ID' })
+  @IsInt()
+  @Min(1)
+  @Max(2147483647)
+  ownerId!: number;
+
   @ApiProperty({ example: 'StudyFlow', minLength: 3, maxLength: 100 })
   @IsString()
   @Length(3, 100)
